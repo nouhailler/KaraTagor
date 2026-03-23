@@ -90,6 +90,32 @@
 
 ---
 
+## Packaging et release (session 2026-03-23)
+
+### Ce qui a été fait
+
+- **requirements.txt** mis à jour avec les versions réellement installées (PyQt6 6.9.0, python-vlc 3.0.21203, mutagen 1.47.0, pyacoustid 1.3.0, pyloudnorm 0.2.0, requests 2.32.3)
+- **CONTEXT.md** créé pour tracer l'état du projet entre sessions
+- **Packaging Debian** créé dans `packaging/karatagor_1.0.0_all/` :
+  - `DEBIAN/control` : métadonnées du paquet
+  - `DEBIAN/postinst` : installation automatique des dépendances pip
+  - `usr/bin/karatagor` : script shell de lancement
+  - `usr/share/applications/karatagor.desktop` : entrée menu FreeDesktop
+  - `usr/share/icons/hicolor/256x256/apps/karatagor.png` : icône PNG 256x256 générée (cercle #1a1a2e + texte "KT" cyan #00d4ff)
+  - `usr/share/karatagor/` : copie de toutes les sources Python (main.py, core/, gui/, assets/)
+- **`packaging/karatagor_1.0.0_all.deb`** : paquet Debian construit (91 Ko)
+- **Git tag v1.0.0** créé et poussé
+- **GitHub Release v1.0.0** créée avec le .deb en asset : https://github.com/nouhailler/KaraTagor/releases/tag/v1.0.0
+
+### Pour installer le paquet
+
+```bash
+sudo dpkg -i karatagor_1.0.0_all.deb
+sudo apt-get install -f
+```
+
+---
+
 ## Points de reprise suggérés
 
 - **Tests** : aucun test unitaire existant — ajouter des tests pour `parse_lrc()`, `read_tags()`/`write_tags()`, `Library`
