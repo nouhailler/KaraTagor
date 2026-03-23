@@ -1,0 +1,31 @@
+# Fichiers audio (ne pas versionner)
+*.mp3
+*.wav
+*.flac
+*.ogg
+*.m4a
+
+# Fichiers LRC générés
+*.lrc
+
+# Backups automatiques
+*.bak
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Configuration utilisateur (contient la clé AcoustID)
+# ~/.config/karatagor/ est hors du repo, pas besoin d'exclure ici
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Divers
+.DS_Store
