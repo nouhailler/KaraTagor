@@ -1,0 +1,12 @@
+Package: karatagor
+Version: 1.0.0
+Section: sound
+Priority: optional
+Architecture: all
+Depends: python3 (>= 3.10), python3-pyqt6, vlc, libchromaprint-tools, python3-pip
+Maintainer: nouhailler <contact@example.com>
+Description: Lecteur karaoké avec gestion des tags ID3v2
+ KaraTagor est un lecteur de fichiers MP3 en mode karaoké avec
+ affichage synchronisé des paroles, identification acoustique AcoustID,
+ gestion des tags ID3v2, bibliothèque musicale et gestion de playlists.
+Homepage: https://github.com/nouhailler/KaraTagor

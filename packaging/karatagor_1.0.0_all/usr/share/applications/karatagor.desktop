@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=KaraTagor
+Comment=Lecteur karaoké avec gestion des tags ID3v2
+Exec=karatagor %f
+Icon=karatagor
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Player;
+MimeType=audio/mpeg;
+Keywords=karaoké;mp3;musique;paroles;
