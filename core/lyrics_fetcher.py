@@ -19,7 +19,8 @@ _LRC_LINE_RE = re.compile(
 )
 
 # Tags de métadonnées LRC à ignorer (ex: [ar:Artist])
-_LRC_META_RE = re.compile(r"\[[a-zA-Z]+:.*\]")
+_LRC_META_RE  = re.compile(r"\[[a-zA-Z]+:.*\]")
+_LRC_OFFSET_RE = re.compile(r"\[offset:\s*([+-]?\d+)\s*\]", re.IGNORECASE)
 
 
 class LyricsFetcher:
@@ -103,7 +104,17 @@ class LyricsFetcher:
         """
         Parse un fichier LRC et retourne une liste triée de (timestamp_ms, texte).
         Supporte les formats [mm:ss.xx], [mm:ss:xx] et [mm:ss].
+        Applique le tag [offset:N] (en ms) s'il est présent.
         """
+        # --- Passe 1 : extraire l'offset global ---
+        offset_ms = 0
+        for raw_line in lrc_string.splitlines():
+            m = _LRC_OFFSET_RE.fullmatch(raw_line.strip())
+            if m:
+                offset_ms = int(m.group(1))
+                break
+
+        # --- Passe 2 : parser les lignes de paroles ---
         result = []
 
         for raw_line in lrc_string.splitlines():
@@ -114,7 +125,6 @@ class LyricsFetcher:
                 continue
 
             # Une ligne peut avoir plusieurs timestamps : [00:10.00][00:11.00]texte
-            # On collecte tous les timestamps puis le texte à la fin
             timestamps = []
             remaining = line
 
@@ -122,23 +132,22 @@ class LyricsFetcher:
                 m = _LRC_LINE_RE.match(remaining)
                 if not m:
                     break
-                minutes = int(m.group(1))
-                seconds = int(m.group(2))
+                minutes  = int(m.group(1))
+                seconds  = int(m.group(2))
                 frac_str = m.group(3) or "0"
                 text_part = m.group(4)
 
-                # Normaliser les centièmes/millièmes en ms
+                # Normaliser centièmes/millièmes en ms
                 if len(frac_str) <= 2:
                     frac_ms = int(frac_str) * 10
                 else:
                     frac_ms = int(frac_str[:3])
 
-                ms = (minutes * 60 + seconds) * 1000 + frac_ms
-                timestamps.append(ms)
+                ms = (minutes * 60 + seconds) * 1000 + frac_ms + offset_ms
+                timestamps.append(max(0, ms))
                 remaining = text_part
 
             text = remaining.strip()
-
             for ms in timestamps:
                 result.append((ms, text))
 

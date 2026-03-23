@@ -44,7 +44,7 @@ class FingerprintEngine:
         """
         try:
             result = subprocess.run(
-                ["fpcalc", "-plain", path],
+                ["fpcalc", path],
                 capture_output=True,
                 text=True,
                 timeout=30,

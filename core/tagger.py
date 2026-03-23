@@ -10,8 +10,8 @@ from typing import Optional
 from mutagen.id3 import (
     ID3, ID3NoHeaderError,
     TIT2, TPE1, TALB, TDRC, TRCK, TCON, COMM,
-    APIC, USLT, SYLT,
-    ID3, error as ID3Error,
+    APIC, USLT, SYLT, TXXX,
+    error as ID3Error,
 )
 from mutagen.mp3 import MP3
 
@@ -166,6 +166,37 @@ class Tagger:
             lrc_content = lyrics_text
 
         lrc_path.write_text(lrc_content, encoding="utf-8")
+
+    # ------------------------------------------------------------------
+    # Offset de synchronisation paroles (tag TXXX custom)
+    # ------------------------------------------------------------------
+
+    _SYNC_TAG_DESC = "KaraTagor_sync_offset"
+
+    def read_sync_offset(self, path: str) -> int:
+        """Lit l'offset de synchronisation (ms) stocké dans le tag TXXX custom. Retourne 0 si absent."""
+        try:
+            tags = ID3(path)
+            frames = tags.getall(f"TXXX:{self._SYNC_TAG_DESC}")
+            if frames:
+                return int(frames[0].text[0])
+        except Exception:
+            pass
+        return 0
+
+    def write_sync_offset(self, path: str, offset_ms: int):
+        """Écrit l'offset de synchronisation dans le tag TXXX (sans backup, opération légère)."""
+        try:
+            try:
+                tags = ID3(path)
+            except ID3NoHeaderError:
+                tags = ID3()
+            tags.delall(f"TXXX:{self._SYNC_TAG_DESC}")
+            if offset_ms != 0:
+                tags.add(TXXX(encoding=3, desc=self._SYNC_TAG_DESC, text=[str(offset_ms)]))
+            tags.save(path, v2_version=3)
+        except Exception:
+            pass   # Ne pas bloquer l'UI pour un tag optionnel
 
     # ------------------------------------------------------------------
     # Helpers

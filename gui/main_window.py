@@ -13,17 +13,22 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QPushButton, QSlider, QLabel, QStatusBar, QMenuBar, QMenu,
     QFileDialog, QMessageBox, QDialog, QScrollArea, QSizePolicy,
-    QProgressDialog,
+    QProgressDialog, QStackedWidget,
 )
 
 from core.audio_engine import AudioEngine
 from core.tagger import Tagger
 from core.config import Config
 from core.lyrics_fetcher import LyricsFetcher
+from core.library import Library
 from gui.lyrics_widget import LyricsWidget
+from gui.library_widget import LibraryWidget
+from gui.playlist_manager import PlaylistManagerDialog
 from gui.tag_editor import TagEditorPanel
 from gui.playlist_widget import PlaylistWidget
+from gui.playlist_tree_widget import PlaylistTreeWidget
 from gui.file_browser import FileBrowser
+from gui.help_dialog import HelpDialog
 
 
 # ------------------------------------------------------------------
@@ -81,6 +86,7 @@ class MainWindow(QMainWindow):
         self._tagger = Tagger(backup_enabled=config.backup_enabled)
         self._audio = AudioEngine(self)
         self._lyrics_fetcher = LyricsFetcher()
+        self._library = Library()
         self._current_path: str | None = None
         self._current_duration_ms: int = 0
         self._current_synced_lyrics: list | None = None
@@ -119,19 +125,25 @@ class MainWindow(QMainWindow):
         self._file_browser = FileBrowser(
             self._config.default_music_folder
         )
-        self._playlist = PlaylistWidget()
+        self._playlist = PlaylistTreeWidget(self._library)
 
         left_vsplit = QSplitter(Qt.Orientation.Vertical)
         left_vsplit.addWidget(self._file_browser)
         left_vsplit.addWidget(self._playlist)
-        left_vsplit.setSizes([300, 200])
+        left_vsplit.setSizes([250, 300])
         left_layout.addWidget(left_vsplit)
 
-        # --- Colonne centrale : paroles ---
+        # --- Colonne centrale : paroles OU bibliothèque (QStackedWidget) ---
+        self._center_stack = QStackedWidget()
+
         self._lyrics_widget = LyricsWidget()
         self._lyrics_widget.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
+        self._library_widget = LibraryWidget(self._library)
+
+        self._center_stack.addWidget(self._lyrics_widget)   # index 0
+        self._center_stack.addWidget(self._library_widget)  # index 1
 
         # --- Colonne droite : tag editor ---
         right_scroll = QScrollArea()
@@ -143,7 +155,7 @@ class MainWindow(QMainWindow):
         right_scroll.setWidget(self._tag_editor)
 
         self._splitter.addWidget(left)
-        self._splitter.addWidget(self._lyrics_widget)
+        self._splitter.addWidget(self._center_stack)
         self._splitter.addWidget(right_scroll)
         self._splitter.setSizes([240, 620, 280])
 
@@ -175,9 +187,11 @@ class MainWindow(QMainWindow):
         self._seek_slider.setObjectName("seek_slider")
         self._seek_slider.setRange(0, 1000)
         self._seek_slider.setSingleStep(1)
-        self._seek_slider.setTracking(False)
+        self._seek_slider.setTracking(True)
         self._seek_slider.sliderPressed.connect(lambda: setattr(self, "_seeking", True))
         self._seek_slider.sliderReleased.connect(self._on_seek)
+        # valueChanged capte aussi le clic direct sur la piste (sliderReleased ne le fait pas)
+        self._seek_slider.valueChanged.connect(self._on_slider_value_changed)
 
         seek_layout.addWidget(self._lbl_pos)
         seek_layout.addWidget(self._seek_slider)
@@ -253,6 +267,40 @@ class MainWindow(QMainWindow):
         ctrl_layout.addStretch()
         ctrl_layout.addWidget(vol_icon)
         ctrl_layout.addWidget(self._vol_slider)
+
+        # --- Contrôle de synchronisation paroles ---
+        sync_sep = QLabel("│")
+        sync_sep.setStyleSheet("color: #2a2a4a; font-size: 18px;")
+
+        self._btn_sync_minus = QPushButton("−0.5s")
+        self._btn_sync_minus.setToolTip("Avancer les paroles de 0.5 seconde")
+        self._btn_sync_minus.setMaximumWidth(54)
+        self._btn_sync_minus.setMaximumHeight(26)
+        self._btn_sync_minus.setStyleSheet(
+            "font-size: 11px; padding: 2px 4px; border-radius: 4px;"
+        )
+        self._btn_sync_minus.clicked.connect(lambda: self._adjust_sync(-500))
+
+        self._lbl_sync = QLabel("±0s")
+        self._lbl_sync.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lbl_sync.setMinimumWidth(42)
+        self._lbl_sync.setStyleSheet("font-size: 11px; color: #7090a0; font-family: monospace;")
+        self._lbl_sync.setToolTip("Décalage paroles actuel")
+
+        self._btn_sync_plus = QPushButton("+0.5s")
+        self._btn_sync_plus.setToolTip("Retarder les paroles de 0.5 seconde")
+        self._btn_sync_plus.setMaximumWidth(54)
+        self._btn_sync_plus.setMaximumHeight(26)
+        self._btn_sync_plus.setStyleSheet(
+            "font-size: 11px; padding: 2px 4px; border-radius: 4px;"
+        )
+        self._btn_sync_plus.clicked.connect(lambda: self._adjust_sync(+500))
+
+        ctrl_layout.addWidget(sync_sep)
+        ctrl_layout.addWidget(self._btn_sync_minus)
+        ctrl_layout.addWidget(self._lbl_sync)
+        ctrl_layout.addWidget(self._btn_sync_plus)
+
         layout.addLayout(ctrl_layout)
 
         return bar
@@ -277,6 +325,19 @@ class MainWindow(QMainWindow):
 
         # Affichage
         view_menu = menubar.addMenu("Affichage")
+
+        self._act_library = QAction("Bibliothèque musicale", self, checkable=True, checked=False)
+        self._act_library.setShortcut("Ctrl+L")
+        self._act_library.triggered.connect(self._toggle_library_view)
+        view_menu.addAction(self._act_library)
+
+        act_playlists = QAction("Gestionnaire de playlists…", self)
+        act_playlists.setShortcut("Ctrl+P")
+        act_playlists.triggered.connect(self._open_playlist_manager)
+        view_menu.addAction(act_playlists)
+
+        view_menu.addSeparator()
+
         act_toggle_left = QAction("Panneau gauche", self, checkable=True, checked=True)
         act_toggle_left.triggered.connect(
             lambda c: self._splitter.widget(0).setVisible(c)
@@ -290,8 +351,13 @@ class MainWindow(QMainWindow):
 
         # Aide
         help_menu = menubar.addMenu("Aide")
+        act_help = QAction("Guide d'utilisation", self)
+        act_help.setShortcut("F1")
+        act_help.triggered.connect(self._show_help)
         act_about = QAction("À propos…", self)
         act_about.triggered.connect(self._show_about)
+        help_menu.addAction(act_help)
+        help_menu.addSeparator()
         help_menu.addAction(act_about)
 
     # ------------------------------------------------------------------
@@ -314,10 +380,19 @@ class MainWindow(QMainWindow):
 
         # Explorateur + Playlist
         self._file_browser.file_activated.connect(self._load_file)
-        self._playlist.track_selected.connect(self._load_file)
         self._file_browser.file_activated.connect(
             lambda p: self._playlist.add_tracks([p])
         )
+        self._playlist.track_selected.connect(self._load_file)
+        self._playlist.track_selected.connect(self._playlist.set_current_by_path)
+        self._playlist.playlist_loaded.connect(self._on_playlist_loaded)
+
+        # Bibliothèque
+        self._library_widget.track_requested.connect(self._load_file)
+        self._library_widget.track_requested.connect(
+            lambda p: self._playlist.add_tracks([p])
+        )
+        self._library_widget.track_requested.connect(self._switch_to_lyrics_view)
 
         # Paroles
         self._lyrics_widget.search_requested.connect(self._search_lyrics_online)
@@ -348,6 +423,12 @@ class MainWindow(QMainWindow):
             f"KaraTagor — {artist + ' - ' if artist else ''}{title}"
         )
 
+        # Enregistrer dans la bibliothèque
+        self._library.record_play(path, tags)
+
+        # Synchroniser la surbrillance dans l'arbre
+        self._playlist.set_current_by_path(path)
+
         # Mini cover
         cover = tags.get("cover_bytes")
         if cover:
@@ -374,25 +455,71 @@ class MainWindow(QMainWindow):
             self._lyrics_widget.clear()
             self.statusBar().showMessage("Aucune parole — cliquez 'Rechercher en ligne'")
 
+        # Restaurer l'offset de synchronisation sauvegardé
+        saved_offset = self._tagger.read_sync_offset(path)
+        self._lyrics_widget.set_sync_offset(saved_offset)
+        self._update_sync_label(saved_offset)
+
         # Audio
         self._audio.load(path)
-        self._current_duration_ms = 0
+        # Initialiser la durée depuis mutagen (disponible immédiatement, sans lancer la lecture)
+        self._current_duration_ms = int(tags.get("duration_sec", 0.0) * 1000)
         self._seek_slider.setValue(0)
         self._lbl_pos.setText("0:00")
-        self._lbl_dur.setText("0:00")
+        self._lbl_dur.setText(self._ms_to_str(self._current_duration_ms))
 
     # ------------------------------------------------------------------
     # Contrôles audio
     # ------------------------------------------------------------------
 
+    def _adjust_sync(self, delta_ms: int):
+        """Ajuste le décalage de synchronisation des paroles par pas de delta_ms."""
+        new_offset = self._lyrics_widget.get_sync_offset() + delta_ms
+        self._lyrics_widget.set_sync_offset(new_offset)
+        self._update_sync_label(new_offset)
+        # Sauvegarde immédiate dans le tag du fichier courant
+        if self._current_path:
+            self._tagger.write_sync_offset(self._current_path, new_offset)
+
+    def _update_sync_label(self, offset_ms: int):
+        sec = offset_ms / 1000
+        sign = "+" if sec > 0 else ""
+        self._lbl_sync.setText(f"{sign}{sec:.1f}s" if sec != 0 else "±0s")
+        if offset_ms == 0:
+            color = "#7090a0"
+        elif offset_ms > 0:
+            color = "#ffab40"   # orange = paroles retardées
+        else:
+            color = "#00d4ff"   # cyan  = paroles avancées
+        self._lbl_sync.setStyleSheet(
+            f"font-size: 11px; color: {color}; font-family: monospace;"
+        )
+
     def _toggle_play(self):
         if self._current_path is None:
             self._open_file_dialog()
             return
-        self._audio.pause() if self._audio.is_playing() else self._audio.play()
+        if self._audio.is_playing():
+            self._audio.pause()
+        else:
+            self._audio.play()
+            pending = getattr(self, "_pending_seek_ms", None)
+            if pending:
+                # Seek différé de 150ms pour laisser VLC démarrer
+                QTimer.singleShot(150, lambda: self._audio.seek(pending))
+                self._pending_seek_ms = None
 
     def _stop(self):
         self._audio.stop()
+
+    def _on_playlist_loaded(self, tracks: list, start_index: int):
+        """Appelé quand une playlist sauvegardée est chargée depuis l'arbre."""
+        if tracks and 0 <= start_index < len(tracks):
+            self._load_file(tracks[start_index])
+            self._audio.play()
+        self.statusBar().showMessage(
+            f"Playlist chargée — {len(tracks)} titre(s), démarrage à la piste {start_index + 1}"
+        )
 
     def _prev_track(self):
         path = self._playlist.prev_track()
@@ -406,11 +533,22 @@ class MainWindow(QMainWindow):
             self._load_file(path)
             self._audio.play()
 
+    def _on_slider_value_changed(self, value: int):
+        """Appelé à chaque changement de valeur initié par l'utilisateur (clic ou glisser).
+        Les mises à jour programmatiques utilisent blockSignals et n'arrivent pas ici."""
+        if self._current_duration_ms == 0:
+            return
+        target_ms = int(value / 1000.0 * self._current_duration_ms)
+        self._pending_seek_ms = target_ms
+        self._lbl_pos.setText(self._ms_to_str(target_ms))
+
     def _on_seek(self):
+        """Appelé au relâchement du handle — seek immédiat si lecture en cours."""
         self._seeking = False
-        if self._current_duration_ms > 0:
-            pos = int(self._seek_slider.value() / 1000.0 * self._current_duration_ms)
-            self._audio.seek(pos)
+        if self._audio.is_playing() and self._current_duration_ms > 0:
+            target_ms = int(self._seek_slider.value() / 1000.0 * self._current_duration_ms)
+            self._audio.seek(target_ms)
+            self._pending_seek_ms = None
 
     # ------------------------------------------------------------------
     # Slots audio
@@ -537,6 +675,39 @@ class MainWindow(QMainWindow):
     # Menus
     # ------------------------------------------------------------------
 
+    def _toggle_library_view(self, checked: bool):
+        if checked:
+            self._library_widget.refresh()
+            self._center_stack.setCurrentIndex(1)
+            self.statusBar().showMessage("Bibliothèque musicale")
+        else:
+            self._center_stack.setCurrentIndex(0)
+            self.statusBar().showMessage("")
+
+    def _switch_to_lyrics_view(self, _path: str = ""):
+        """Bascule vers la vue paroles et décoche le menu Bibliothèque."""
+        self._center_stack.setCurrentIndex(0)
+        self._act_library.setChecked(False)
+
+    def _open_playlist_manager(self):
+        dlg = PlaylistManagerDialog(
+            self._library,
+            self._playlist.get_tracks(),
+            self,
+        )
+        dlg.playlist_load_requested.connect(self._on_playlist_loaded_from_dialog)
+        dlg.exec()
+        # Rafraîchir l'arbre après toute modification (ajout/suppression)
+        self._playlist.refresh_playlists()
+
+    def _on_playlist_loaded_from_dialog(self, paths: list[str]):
+        self._playlist.clear_playlist()
+        self._playlist.add_tracks(paths)
+        if paths:
+            self._load_file(paths[0])
+            self._audio.play()
+        self.statusBar().showMessage(f"Playlist chargée — {len(paths)} titre(s)")
+
     def _open_file_dialog(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Ouvrir un fichier MP3",
@@ -555,6 +726,10 @@ class MainWindow(QMainWindow):
         if folder:
             self._config.default_music_folder = folder
             self._file_browser.set_root(folder)
+
+    def _show_help(self):
+        dlg = HelpDialog(self)
+        dlg.exec()
 
     def _show_about(self):
         QMessageBox.about(
